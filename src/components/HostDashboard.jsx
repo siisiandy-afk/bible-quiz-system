@@ -10,7 +10,13 @@ import {
 import { publishMessage } from '../services/mqtt';
 import { roomService } from '../services/supabase';
 
-export default function HostDashboard({ roomCode, onExit, onOpenDisplay, mqttEvents }) {
+export default function HostDashboard({
+  roomCode,
+  onExit,
+  onOpenDisplay,
+  onOpenChangePassword,
+  mqttEvents,
+}) {
   const [audioOverlayVisible, setAudioOverlayVisible] = useState(true);
   const [timerDisplay, setTimerDisplay] = useState('--');
   const [timerWarning, setTimerWarning] = useState(false);
@@ -441,6 +447,16 @@ export default function HostDashboard({ roomCode, onExit, onOpenDisplay, mqttEve
         <div className="host-screen__buzz-header">
           <h3 className="host-screen__buzz-title">Buzz Order</h3>
           <div className="host-screen__buzz-actions">
+            {onOpenChangePassword && (
+              <button
+                type="button"
+                onClick={onOpenChangePassword}
+                className="host-screen__password-btn"
+                title="Change Quiz Master Password"
+              >
+                Change Password
+              </button>
+            )}
             {onOpenDisplay && (
               <button
                 type="button"

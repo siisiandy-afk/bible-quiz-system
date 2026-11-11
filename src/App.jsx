@@ -8,7 +8,7 @@ import ContestantScreen from './components/ContestantScreen';
 import PublicDisplay from './components/PublicDisplay';
 import ConnectionState from './components/ConnectionState';
 import { connectMQTT, disconnectMQTT } from './services/mqtt';
-import { roomService } from './services/supabase';
+import { authService, isSupabaseConfigured, roomService } from './services/supabase';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState('setup'); // 'setup' | 'host' | 'player' | 'display'
@@ -19,6 +19,8 @@ export default function App() {
   const [roomCode, setRoomCode] = useState('');
   const [playerName, setPlayerName] = useState('');
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+  const [passwordModalMode, setPasswordModalMode] = useState(null); // null | 'change' | 'recovery'
+  const [hostUser, setHostUser] = useState(null);
   const [mqttEvents, setMqttEvents] = useState(null);
 
   const pendingSessionRef = useRef(null);
@@ -69,6 +71,8 @@ export default function App() {
   // Handle Host Start (Quiz Master)
   const handleStartHost = async (authenticatedUser) => {
     setIsAdminModalOpen(false);
+    setPasswordModalMode(null);
+    setHostUser(authenticatedUser || null);
     const code = Math.floor(1000 + Math.random() * 9000).toString();
 
     // Register room in Supabase (if configured)
@@ -158,8 +162,58 @@ export default function App() {
     setPendingSession(null);
     setRoomCode('');
     setPlayerName('');
+    setHostUser(null);
+    setPasswordModalMode(null);
     setIsOnline(false);
     setMqttEvents(null);
+  };
+
+  // Detect Supabase password recovery links and auth state events
+  useEffect(() => {
+    const checkRecoveryUrl = () => {
+      try {
+        const searchParams = new URLSearchParams(window.location.search);
+        if (
+          window.location.hash.includes('type=recovery') ||
+          searchParams.get('type') === 'recovery'
+        ) {
+          setIsAdminModalOpen(false);
+          setPasswordModalMode('recovery');
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    if (authService.consumePendingRecovery()) {
+      setIsAdminModalOpen(false);
+      setPasswordModalMode('recovery');
+    }
+    checkRecoveryUrl();
+
+    window.addEventListener('hashchange', checkRecoveryUrl);
+    const { data } = authService.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        authService.consumePendingRecovery();
+        setIsAdminModalOpen(false);
+        setPasswordModalMode('recovery');
+      }
+    });
+
+    return () => {
+      window.removeEventListener('hashchange', checkRecoveryUrl);
+      data?.subscription?.unsubscribe();
+    };
+  }, []);
+
+  const clearRecoveryUrl = () => {
+    try {
+      if (window.location.hash || window.location.search.includes('type=recovery')) {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+    } catch {
+      // ignore
+    }
   };
 
   // Check URL parameters for direct public display entry (e.g. ?display=1234)
@@ -222,6 +276,11 @@ export default function App() {
                 roomCode={roomCode}
                 onExit={handleExit}
                 onOpenDisplay={() => handleOpenDisplay(roomCode)}
+                onOpenChangePassword={
+                  isSupabaseConfigured && hostUser?.email
+                    ? () => setPasswordModalMode('change')
+                    : null
+                }
                 mqttEvents={mqttEvents}
               />
             )}
@@ -247,9 +306,18 @@ export default function App() {
       </main>
 
       <AdminLogin
-        isOpen={isAdminModalOpen}
-        onClose={() => setIsAdminModalOpen(false)}
+        isOpen={isAdminModalOpen || Boolean(passwordModalMode)}
+        onClose={() => {
+          setIsAdminModalOpen(false);
+          setPasswordModalMode(null);
+        }}
         onSuccess={handleStartHost}
+        initialMode={passwordModalMode || 'signin'}
+        prefillEmail={passwordModalMode === 'change' ? hostUser?.email || '' : ''}
+        keepSessionOnPasswordChange={
+          currentScreen === 'host' && passwordModalMode === 'change'
+        }
+        onRecoveryComplete={clearRecoveryUrl}
       />
     </div>
   );

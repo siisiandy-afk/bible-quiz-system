@@ -11,6 +11,11 @@ export const isSupabaseConfigured = Boolean(
   !rawUrl.includes('your-project-id')
 );
 
+let pendingPasswordRecovery =
+  typeof window !== 'undefined' &&
+  (window.location.hash.includes('type=recovery') ||
+    new URLSearchParams(window.location.search).get('type') === 'recovery');
+
 export const supabase = isSupabaseConfigured
   ? createClient(rawUrl.trim(), rawAnonKey.trim(), {
       auth: {
@@ -25,6 +30,14 @@ export const supabase = isSupabaseConfigured
       },
     })
   : null;
+
+if (supabase) {
+  supabase.auth.onAuthStateChange((event) => {
+    if (event === 'PASSWORD_RECOVERY') {
+      pendingPasswordRecovery = true;
+    }
+  });
+}
 
 /**
  * Quiz Master Authentication Service
@@ -76,6 +89,62 @@ export const authService = {
       return { data: { subscription: { unsubscribe: () => {} } } };
     }
     return supabase.auth.onAuthStateChange(callback);
+  },
+
+  consumePendingRecovery() {
+    const val = pendingPasswordRecovery;
+    pendingPasswordRecovery = false;
+    return val;
+  },
+
+  async resetPasswordForEmail(email) {
+    if (!isSupabaseConfigured || !supabase) {
+      return {
+        data: null,
+        error: new Error('Supabase Auth is not configured. Add credentials to .env to enable.'),
+      };
+    }
+    const redirectTo =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : undefined;
+    return await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+  },
+
+  async updatePassword({ newPassword }) {
+    if (!isSupabaseConfigured || !supabase) {
+      return {
+        data: null,
+        error: new Error('Supabase Auth is not configured. Add credentials to .env to enable.'),
+      };
+    }
+    return await supabase.auth.updateUser({ password: newPassword });
+  },
+
+  async changePassword({ email, currentPassword, newPassword }) {
+    if (!isSupabaseConfigured || !supabase) {
+      return {
+        data: null,
+        error: new Error('Supabase Auth is not configured. Add credentials to .env to enable.'),
+      };
+    }
+
+    const { error: verifyError } = await supabase.auth.signInWithPassword({
+      email,
+      password: currentPassword,
+    });
+    if (verifyError) {
+      return {
+        data: null,
+        error: new Error(
+          verifyError.message === 'Invalid login credentials'
+            ? 'Current password is incorrect.'
+            : verifyError.message
+        ),
+      };
+    }
+
+    return await supabase.auth.updateUser({ password: newPassword });
   },
 };
 
