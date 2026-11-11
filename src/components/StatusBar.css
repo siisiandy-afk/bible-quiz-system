@@ -1,0 +1,25 @@
+.status-bar {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 700;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  z-index: 50;
+  letter-spacing: 0.05em;
+  transition: all 0.2s ease-in-out;
+}
+
+.status-bar--online {
+  background-color: #064e3b;
+  color: #34d399;
+  border: 1px solid #10b981;
+}
+
+.status-bar--offline {
+  background-color: #7f1d1d;
+  color: #fca5a5;
+  border: 1px solid #ef4444;
+}
