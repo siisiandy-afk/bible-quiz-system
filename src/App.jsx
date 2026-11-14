@@ -49,6 +49,11 @@ export default function App() {
           setIsOnline(online);
         },
         onConnect: () => {
+          try {
+            sessionStorage.setItem('quiz_active_session', JSON.stringify(session));
+          } catch {
+            // ignore
+          }
           setConnectionStatus('idle');
           setRoomCode(code);
           setPlayerName(name);
@@ -68,19 +73,78 @@ export default function App() {
     [handleMqttMessage]
   );
 
+  // Restore authentication state on load
+  useEffect(() => {
+    let isMounted = true;
+
+    if (isSupabaseConfigured) {
+      authService.getUser().then(({ data }) => {
+        if (isMounted && data?.user) {
+          setHostUser(data.user);
+        }
+      });
+
+      const { data: authListener } = authService.onAuthStateChange((event, session) => {
+        if (!isMounted) return;
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+          setHostUser(session?.user || null);
+        } else if (event === 'SIGNED_OUT') {
+          setHostUser(null);
+        }
+      });
+
+      return () => {
+        isMounted = false;
+        authListener?.subscription?.unsubscribe();
+      };
+    }
+  }, []);
+
+  // Restore active room session if refreshed
+  useEffect(() => {
+    try {
+      const savedStr = sessionStorage.getItem('quiz_active_session');
+      if (savedStr) {
+        const saved = JSON.parse(savedStr);
+        if (saved?.roomCode && saved?.mode) {
+          roomService.verifyRoom(saved.roomCode).then((verify) => {
+            if (verify.exists) {
+              initiateConnection({
+                mode: saved.mode,
+                code: saved.roomCode,
+                name: saved.playerName || '',
+              });
+            } else {
+              sessionStorage.removeItem('quiz_active_session');
+            }
+          });
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, [initiateConnection]);
+
   // Handle Host Start (Quiz Master)
   const handleStartHost = async (authenticatedUser) => {
     setIsAdminModalOpen(false);
     setPasswordModalMode(null);
-    setHostUser(authenticatedUser || null);
+    const userToUse = authenticatedUser || hostUser;
+    setHostUser(userToUse || null);
     const code = Math.floor(1000 + Math.random() * 9000).toString();
 
     // Register room in Supabase (if configured)
-    await roomService.createRoom({
+    const createRes = await roomService.createRoom({
       roomCode: code,
-      hostId: authenticatedUser?.id || null,
+      hostId: userToUse?.id || null,
       gameMode: 'standard',
     });
+
+    if (!createRes.success) {
+      setConnectionStatus('error');
+      setConnectionError(createRes.error || 'Failed to register room in database.');
+      return;
+    }
 
     initiateConnection({ mode: 'host', code, name: '' });
   };
@@ -152,6 +216,12 @@ export default function App() {
 
   // Handle Exit / Leave Room
   const handleExit = () => {
+    try {
+      sessionStorage.removeItem('quiz_active_session');
+    } catch {
+      // ignore
+    }
+
     if (currentScreen === 'host') {
       roomService.closeRoom(roomCode);
     }
@@ -162,7 +232,6 @@ export default function App() {
     setPendingSession(null);
     setRoomCode('');
     setPlayerName('');
-    setHostUser(null);
     setPasswordModalMode(null);
     setIsOnline(false);
     setMqttEvents(null);
@@ -232,9 +301,7 @@ export default function App() {
   // Handle window unload cleanup
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (currentScreen === 'host' && roomCode) {
-        roomService.closeRoom(roomCode);
-      }
+      // Do NOT close room on refresh, so competition persists across page reloads.
       if (currentScreen === 'player' && playerName && roomCode) {
         disconnectMQTT(roomCode, playerName, false);
       }
@@ -318,6 +385,8 @@ export default function App() {
           currentScreen === 'host' && passwordModalMode === 'change'
         }
         onRecoveryComplete={clearRecoveryUrl}
+        currentUser={hostUser}
+        onSignOut={() => setHostUser(null)}
       />
     </div>
   );

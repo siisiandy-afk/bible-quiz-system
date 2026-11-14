@@ -2,17 +2,13 @@ import React, { useState, useEffect } from 'react';
 import './AdminLogin.css';
 import { isSupabaseConfigured, authService } from '../services/supabase';
 
-// Demo PIN from original vanilla application (fallback when Supabase is not connected)
-const DEMO_ADMIN_PIN = '1234';
 const MIN_PASSWORD_LENGTH = 6;
 
 const MODAL_META = {
   signin: {
     title: 'Quiz Master Access',
     subtitleConfigured: 'Sign in with your Quiz Master credentials',
-    subtitleDemo: 'Enter Quiz Master authorization PIN to initialize room',
     submitConfigured: 'Sign In',
-    submitDemo: 'Authorize',
     busyLabel: 'Authenticating...',
   },
   forgot: {
@@ -56,6 +52,8 @@ export default function AdminLogin({
   prefillEmail = '',
   keepSessionOnPasswordChange = false,
   onRecoveryComplete,
+  currentUser = null,
+  onSignOut,
 }) {
   const [mode, setMode] = useState(initialMode);
   const [email, setEmail] = useState(prefillEmail);
@@ -63,7 +61,6 @@ export default function AdminLogin({
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -73,23 +70,22 @@ export default function AdminLogin({
     setCurrentPassword('');
     setNewPassword('');
     setConfirmPassword('');
-    setPin('');
     setError('');
   };
 
   useEffect(() => {
     if (isOpen) {
-      setMode(isSupabaseConfigured ? initialMode : 'signin');
-      setEmail(prefillEmail || '');
+      setMode(initialMode);
+      setEmail(prefillEmail || currentUser?.email || '');
       setSuccessMsg('');
       setIsSubmitting(false);
       resetSensitiveFields();
     }
-  }, [isOpen, initialMode, prefillEmail]);
+  }, [isOpen, initialMode, prefillEmail, currentUser]);
 
   if (!isOpen) return null;
 
-  const activeMode = isSupabaseConfigured ? mode : 'signin';
+  const activeMode = mode;
   const copy = MODAL_META[activeMode] || MODAL_META.signin;
   const isRecoveryOnly = initialMode === 'recovery' && activeMode === 'recovery';
   const showSuccessCloseOnly = keepSessionOnPasswordChange && activeMode === 'change' && Boolean(successMsg);
@@ -109,6 +105,11 @@ export default function AdminLogin({
   };
 
   const handleSignInSubmit = async () => {
+    if (currentUser) {
+      onSuccess(currentUser);
+      return;
+    }
+
     if (!email.trim() || !password.trim()) {
       setError('Please enter your Quiz Master email and password.');
       return;
@@ -163,7 +164,7 @@ export default function AdminLogin({
   };
 
   const handleChangeSubmit = async () => {
-    const cleanEmail = (prefillEmail || email).trim();
+    const cleanEmail = (prefillEmail || currentUser?.email || email).trim();
     if (!cleanEmail || !currentPassword) {
       setError('Please enter your email and current password.');
       return;
@@ -191,6 +192,7 @@ export default function AdminLogin({
 
       if (!keepSessionOnPasswordChange) {
         await authService.signOut();
+        if (onSignOut) onSignOut();
       }
 
       setIsSubmitting(false);
@@ -226,6 +228,7 @@ export default function AdminLogin({
       }
 
       await authService.signOut();
+      if (onSignOut) onSignOut();
       if (onRecoveryComplete) onRecoveryComplete();
 
       setIsSubmitting(false);
@@ -244,13 +247,7 @@ export default function AdminLogin({
     setSuccessMsg('');
 
     if (!isSupabaseConfigured) {
-      if (pin === DEMO_ADMIN_PIN) {
-        setError('');
-        setPin('');
-        onSuccess(null);
-      } else {
-        setError('Incorrect PIN. (Original Demo PIN is 1234)');
-      }
+      setError('Supabase authentication is not configured.');
       return;
     }
 
@@ -263,81 +260,104 @@ export default function AdminLogin({
   return (
     <div className="admin-modal-overlay" onClick={handleClose}>
       <div className="admin-modal-card" onClick={(e) => e.stopPropagation()}>
-        <h2 className="admin-modal-title">{copy.title}</h2>
+        <h2 className="admin-modal-title">
+          {currentUser && activeMode === 'signin' ? 'Quiz Master Session' : copy.title}
+        </h2>
         <p className="admin-modal-subtitle">
-          {isSupabaseConfigured ? copy.subtitleConfigured : copy.subtitleDemo}
+          {currentUser && activeMode === 'signin'
+            ? `Signed in as ${currentUser.email}`
+            : isSupabaseConfigured
+            ? copy.subtitleConfigured
+            : 'Configuration required'}
         </p>
 
-        {activeMode === 'signin' &&
-          (isSupabaseConfigured ? (
+        {!isSupabaseConfigured ? (
+          <div className="admin-modal-notice admin-modal-error">
+            <strong>Configuration Required:</strong> Supabase authentication is not configured. Add valid credentials to <code>.env</code> to enable Quiz Master access.
+          </div>
+        ) : (
+          activeMode === 'signin' && (
             <div className="admin-modal-notice admin-modal-notice--configured">
-              <strong>Supabase Auth Active:</strong> Authenticating directly with Supabase. Only authorized Quiz Masters can create and administer competition rooms.
+              <strong>Supabase Auth Active:</strong> {currentUser ? `Signed in as ${currentUser.email}. Ready to initialize a competition room.` : 'Authenticating directly with Supabase. Only authorized Quiz Masters can create and administer competition rooms.'}
             </div>
-          ) : (
-            <div className="admin-modal-notice">
-              <strong>Security Notice:</strong> Demo PIN is <code>1234</code>. Supabase credentials are not yet configured in <code>.env</code>. This client PIN is a temporary placeholder and does not provide server security.
-            </div>
-          ))}
+          )
+        )}
 
         {successMsg && <div className="admin-modal-success">{successMsg}</div>}
 
         <form onSubmit={handleSubmit}>
-          {!isSupabaseConfigured ? (
-            <input
-              type="password"
-              className="admin-modal-input admin-modal-input--pin"
-              placeholder="PIN (Demo: 1234)"
-              value={pin}
-              onChange={(e) => {
-                setPin(e.target.value);
-                setError('');
-              }}
-              autoFocus
-            />
-          ) : (
+          {isSupabaseConfigured && (
             <>
-              {(activeMode === 'signin' || activeMode === 'forgot' || activeMode === 'change') && (
+              {activeMode === 'signin' && !currentUser && (
+                <>
+                  <input
+                    type="email"
+                    className="admin-modal-input"
+                    placeholder="Quiz Master Email"
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      setError('');
+                      setSuccessMsg('');
+                    }}
+                    autoFocus
+                  />
+                  <input
+                    type="password"
+                    className="admin-modal-input"
+                    placeholder="Password"
+                    value={password}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      setError('');
+                    }}
+                  />
+                </>
+              )}
+
+              {activeMode === 'forgot' && (
                 <input
                   type="email"
                   className="admin-modal-input"
                   placeholder="Quiz Master Email"
                   value={email}
-                  readOnly={activeMode === 'change' && Boolean(prefillEmail)}
                   onChange={(e) => {
                     setEmail(e.target.value);
                     setError('');
                     setSuccessMsg('');
                   }}
-                  autoFocus={activeMode !== 'change' || !prefillEmail}
-                />
-              )}
-
-              {activeMode === 'signin' && (
-                <input
-                  type="password"
-                  className="admin-modal-input"
-                  placeholder="Password"
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    setError('');
-                  }}
+                  autoFocus
                 />
               )}
 
               {activeMode === 'change' && (
-                <input
-                  type="password"
-                  className="admin-modal-input"
-                  placeholder="Current Password"
-                  value={currentPassword}
-                  onChange={(e) => {
-                    setCurrentPassword(e.target.value);
-                    setError('');
-                    setSuccessMsg('');
-                  }}
-                  autoFocus={Boolean(prefillEmail)}
-                />
+                <>
+                  <input
+                    type="email"
+                    className="admin-modal-input"
+                    placeholder="Quiz Master Email"
+                    value={email || currentUser?.email || ''}
+                    readOnly={Boolean(currentUser?.email || prefillEmail)}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      setError('');
+                      setSuccessMsg('');
+                    }}
+                    autoFocus={!currentUser?.email && !prefillEmail}
+                  />
+                  <input
+                    type="password"
+                    className="admin-modal-input"
+                    placeholder="Current Password"
+                    value={currentPassword}
+                    onChange={(e) => {
+                      setCurrentPassword(e.target.value);
+                      setError('');
+                      setSuccessMsg('');
+                    }}
+                    autoFocus={Boolean(currentUser?.email || prefillEmail)}
+                  />
+                </>
               )}
 
               {(activeMode === 'change' || activeMode === 'recovery') && (
@@ -381,7 +401,7 @@ export default function AdminLogin({
             >
               {showSuccessCloseOnly ? 'Close' : 'Cancel'}
             </button>
-            {!showSuccessCloseOnly && (
+            {!showSuccessCloseOnly && isSupabaseConfigured && (
               <button
                 type="submit"
                 className="admin-modal-btn-submit btn-push"
@@ -389,9 +409,9 @@ export default function AdminLogin({
               >
                 {isSubmitting
                   ? copy.busyLabel
-                  : isSupabaseConfigured
-                  ? copy.submitConfigured
-                  : copy.submitDemo}
+                  : currentUser && activeMode === 'signin'
+                  ? 'Create Room'
+                  : copy.submitConfigured}
               </button>
             )}
           </div>
@@ -408,14 +428,28 @@ export default function AdminLogin({
                   >
                     Change Password
                   </button>
-                  <button
-                    type="button"
-                    className="admin-modal-link-btn"
-                    onClick={() => switchMode('forgot')}
-                    disabled={isSubmitting}
-                  >
-                    Forgot Password?
-                  </button>
+                  {currentUser ? (
+                    <button
+                      type="button"
+                      className="admin-modal-link-btn"
+                      onClick={async () => {
+                        await authService.signOut();
+                        if (onSignOut) onSignOut();
+                      }}
+                      disabled={isSubmitting}
+                    >
+                      Sign Out
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="admin-modal-link-btn"
+                      onClick={() => switchMode('forgot')}
+                      disabled={isSubmitting}
+                    >
+                      Forgot Password?
+                    </button>
+                  )}
                 </>
               ) : (
                 <button

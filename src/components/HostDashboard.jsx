@@ -149,6 +149,7 @@ export default function HostDashboard({
     buzzesRef.current = [];
     setBuzzList([]);
     publishMessage(roomCode, 'reset', 'TRUE');
+    roomService.nextRound(roomCode);
 
     setIsLocked(false);
     roundStartTimeRef.current = Date.now();
@@ -213,6 +214,7 @@ export default function HostDashboard({
     setTimerBlink(false);
 
     publishMessage(roomCode, 'reset', 'TRUE');
+    roomService.nextRound(roomCode);
 
     if (gameMode === 'speed') {
       setIsLocked(false);

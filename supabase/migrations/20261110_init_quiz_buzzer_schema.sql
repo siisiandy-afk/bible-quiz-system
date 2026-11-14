@@ -111,7 +111,41 @@ END;
 $$;
 
 -- ----------------------------------------------------------------------------
--- 5. ROOM VERIFICATION FUNCTION
+-- 5. ADVANCE ROUND FUNCTION (Enables Multi-Round Progression)
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.next_round(p_room_code VARCHAR)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_room public.rooms%ROWTYPE;
+    v_new_round INTEGER;
+BEGIN
+    SELECT * INTO v_room FROM public.rooms WHERE room_code = p_room_code AND is_active = true;
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Room not found or inactive');
+    END IF;
+
+    -- If caller is authenticated and host_id is set, ensure caller is the host
+    IF v_room.host_id IS NOT NULL AND auth.uid() IS NOT NULL AND v_room.host_id != auth.uid() THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Unauthorized: not room host');
+    END IF;
+
+    UPDATE public.rooms
+    SET round_number = round_number + 1,
+        status = 'LOCKED',
+        updated_at = now()
+    WHERE id = v_room.id
+    RETURNING round_number INTO v_new_round;
+
+    RETURN jsonb_build_object('success', true, 'round_number', v_new_round);
+END;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 6. ROOM VERIFICATION FUNCTION
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.verify_room(p_room_code VARCHAR)
 RETURNS JSONB
@@ -138,7 +172,7 @@ END;
 $$;
 
 -- ----------------------------------------------------------------------------
--- 6. ROW LEVEL SECURITY (RLS) POLICIES
+-- 7. ROW LEVEL SECURITY (RLS) POLICIES
 -- ----------------------------------------------------------------------------
 ALTER TABLE public.rooms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.contestants ENABLE ROW LEVEL SECURITY;
@@ -153,12 +187,12 @@ CREATE POLICY "Public can view active rooms"
 -- Authenticated hosts can create rooms
 CREATE POLICY "Hosts can create rooms"
     ON public.rooms FOR INSERT
-    WITH CHECK (auth.uid() IS NOT NULL OR true);
+    WITH CHECK (auth.uid() IS NOT NULL);
 
 -- Host can update their own room
 CREATE POLICY "Hosts can update their rooms"
     ON public.rooms FOR UPDATE
-    USING (host_id = auth.uid() OR host_id IS NULL);
+    USING (host_id = auth.uid());
 
 -- CONTESTANTS POLICIES
 -- Anyone in the room can see the connected contestants

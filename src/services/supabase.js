@@ -154,16 +154,13 @@ export const authService = {
 export const roomService = {
   /**
    * Verifies if an active room exists in the database.
-   * If Supabase is not configured, allows demo mode passthrough with warning.
    */
   async verifyRoom(roomCode) {
     const cleanCode = String(roomCode).trim();
     if (!isSupabaseConfigured || !supabase) {
-      // In demo mode without database, connection proceeds via MQTT with disclaimer
       return {
-        exists: true,
-        isDemo: true,
-        room: { room_code: cleanCode, status: 'LOCKED', game_mode: 'standard' },
+        exists: false,
+        error: 'Database service is not configured. Please contact administrator.',
       };
     }
 
@@ -198,9 +195,8 @@ export const roomService = {
     const cleanCode = String(roomCode).trim();
     if (!isSupabaseConfigured || !supabase) {
       return {
-        success: true,
-        isDemo: true,
-        room: { room_code: cleanCode, status: 'LOCKED', game_mode: gameMode },
+        success: false,
+        error: 'Database service is not configured.',
       };
     }
 
@@ -225,6 +221,32 @@ export const roomService = {
       return { success: true, room: data };
     } catch (err) {
       console.error('Unexpected error creating room in Supabase:', err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /**
+   * Advances room to the next round, clearing per-round buzzer locks.
+   */
+  async nextRound(roomCode) {
+    const cleanCode = String(roomCode).trim();
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Database service is not configured.' };
+    }
+
+    try {
+      const { data, error } = await supabase.rpc('next_round', {
+        p_room_code: cleanCode,
+      });
+
+      if (error) {
+        console.error('Error advancing round in Supabase:', error);
+        return { success: false, error: error.message };
+      }
+
+      return data || { success: true };
+    } catch (err) {
+      console.error('Unexpected error advancing round:', err);
       return { success: false, error: err.message };
     }
   },
@@ -264,7 +286,9 @@ export const roomService = {
    * Registers a contestant in an active room
    */
   async registerContestant(roomCode, playerName, sessionId) {
-    if (!isSupabaseConfigured || !supabase) return { success: true, isDemo: true };
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Database service is not configured.' };
+    }
 
     try {
       const verifyRes = await this.verifyRoom(roomCode);
@@ -304,7 +328,7 @@ export const roomService = {
    */
   async recordBuzz(roomCode, playerName) {
     if (!isSupabaseConfigured || !supabase) {
-      return { success: true, isDemo: true };
+      return { success: false, error: 'Database service is not configured.' };
     }
 
     try {
