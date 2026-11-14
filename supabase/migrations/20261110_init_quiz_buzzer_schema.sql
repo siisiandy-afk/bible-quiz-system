@@ -145,7 +145,44 @@ END;
 $$;
 
 -- ----------------------------------------------------------------------------
--- 6. ROOM VERIFICATION FUNCTION
+-- 6. ROOM STATUS CONTROLS
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.set_room_status(p_room_code VARCHAR, p_status VARCHAR)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    UPDATE public.rooms
+    SET status = p_status, updated_at = now()
+    WHERE room_code = p_room_code AND is_active = true;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Room not found or inactive');
+    END IF;
+
+    RETURN jsonb_build_object('success', true, 'status', p_status);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.close_room(p_room_code VARCHAR)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    UPDATE public.rooms
+    SET is_active = false, updated_at = now()
+    WHERE room_code = p_room_code;
+
+    RETURN jsonb_build_object('success', true);
+END;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 7. ROOM VERIFICATION FUNCTION
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.verify_room(p_room_code VARCHAR)
 RETURNS JSONB
@@ -172,7 +209,7 @@ END;
 $$;
 
 -- ----------------------------------------------------------------------------
--- 7. ROW LEVEL SECURITY (RLS) POLICIES
+-- 8. ROW LEVEL SECURITY (RLS) POLICIES
 -- ----------------------------------------------------------------------------
 ALTER TABLE public.rooms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.contestants ENABLE ROW LEVEL SECURITY;

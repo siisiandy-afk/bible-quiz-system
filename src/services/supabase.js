@@ -257,11 +257,17 @@ export const roomService = {
   async updateRoomStatus(roomCode, status) {
     if (!isSupabaseConfigured || !supabase) return;
     try {
-      await supabase
-        .from('rooms')
-        .update({ status, updated_at: new Date().toISOString() })
-        .eq('room_code', String(roomCode).trim())
-        .eq('is_active', true);
+      const { error } = await supabase.rpc('set_room_status', {
+        p_room_code: String(roomCode).trim(),
+        p_status: status,
+      });
+      if (error) {
+        await supabase
+          .from('rooms')
+          .update({ status, updated_at: new Date().toISOString() })
+          .eq('room_code', String(roomCode).trim())
+          .eq('is_active', true);
+      }
     } catch (err) {
       console.error('Error updating room status in Supabase:', err);
     }
@@ -273,10 +279,15 @@ export const roomService = {
   async closeRoom(roomCode) {
     if (!isSupabaseConfigured || !supabase) return;
     try {
-      await supabase
-        .from('rooms')
-        .update({ is_active: false, updated_at: new Date().toISOString() })
-        .eq('room_code', String(roomCode).trim());
+      const { error } = await supabase.rpc('close_room', {
+        p_room_code: String(roomCode).trim(),
+      });
+      if (error) {
+        await supabase
+          .from('rooms')
+          .update({ is_active: false, updated_at: new Date().toISOString() })
+          .eq('room_code', String(roomCode).trim());
+      }
     } catch (err) {
       console.error('Error closing room in Supabase:', err);
     }
